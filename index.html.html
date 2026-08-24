@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trackline Status — Live Train Status &amp; Platform Health</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f5f6fa;
+    --surface:#ffffff;
+    --surface-2:#fafbfd;
+    --board-bg:#fcfcfe;
+    --border:#e6e8f0;
+    --border-soft:#edeef5;
+    --text:#12141c;
+    --muted:#6b7280;
+    --muted-dim:#9aa0ad;
+    --accent:#4f46e5;
+    --accent-soft:#eef0ff;
+    --accent-border:#d9dcfb;
+    --green:#16a34a;
+    --green-soft:#e7f8ee;
+    --green-border:#bfeacf;
+    --red:#e11d48;
+    --red-soft:#fdecef;
+    --red-border:#f6c7d1;
+    --amber:#c2680a;
+    --amber-soft:#fdf1de;
+    --amber-border:#f3ddad;
+    --radius:14px;
+    --shadow:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.05);
+    --shadow-md:0 6px 20px rgba(16,24,40,.06);
+    /* fixed dark tokens used only inside the internal console for badges */
+    --red-dim:#3a1418; --green-dim:#0f3320; --amber-dim:#3f2c0a; --warn:#f5a623;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:
+      radial-gradient(ellipse 900px 420px at 20% -10%, var(--accent-soft) 0%, transparent 60%),
+      var(--bg);
+    color:var(--text);
+    font-family:'Inter',sans-serif;
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  .display{font-family:'Sora',sans-serif;}
+  .mono{font-family:'IBM Plex Mono',monospace;}
+  a{color:inherit;}
+
+  /* ---------- Top bar ---------- */
+  .topbar{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:14px 28px;border-bottom:1px solid var(--border);
+    position:sticky;top:0;z-index:50;
+    background:rgba(255,255,255,0.86);backdrop-filter:blur(10px);
+  }
+  .brand{display:flex;align-items:center;gap:10px;}
+  .brand .mark{
+    width:30px;height:30px;border-radius:8px;
+    background:linear-gradient(155deg,var(--accent),#3730a3);
+    display:flex;align-items:center;justify-content:center;
+    font-family:'Sora';font-weight:700;color:#fff;font-size:15px;
+    box-shadow:0 3px 8px rgba(79,70,229,.28);
+  }
+  .brand .name{font-family:'Sora';font-weight:700;font-size:19px;letter-spacing:0.1px;color:var(--text);}
+  .brand .name span{color:var(--accent);}
+  .navlinks{display:flex;gap:22px;margin-left:26px;}
+  .navlinks a{font-size:13px;color:var(--muted);text-decoration:none;font-weight:500;}
+  .navlinks a:hover{color:var(--text);}
+  .navlinks a.tab-link.active{color:var(--accent);font-weight:700;}
+  .tabpanel{display:none;}
+  .tabpanel.active{display:flex;flex-direction:column;gap:20px;}
+  .nav-left{display:flex;align-items:center;}
+  .sys-status{display:flex;align-items:center;gap:12px;}
+  .sys-status .clock{color:var(--muted-dim);font-size:12.5px;letter-spacing:0.3px;}
+  .pill{
+    display:flex;align-items:center;gap:7px;
+    padding:6px 12px;border-radius:100px;
+    font-size:12px;font-weight:600;letter-spacing:0.1px;
+    border:1px solid var(--border);
+    background:var(--surface-2);
+    transition:all .35s ease;
+  }
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--green);}
+  .pill.up{color:var(--green);border-color:var(--green-border);background:var(--green-soft);}
+  .pill.up .dot{background:var(--green);box-shadow:0 0 6px rgba(22,163,74,.5);}
+  .pill.down{color:var(--red);border-color:var(--red-border);background:var(--red-soft);}
+  .pill.down .dot{background:var(--red);box-shadow:0 0 6px rgba(225,29,72,.5);animation:pulse 1s infinite;}
+  .pill.resolved{color:var(--green);border-color:var(--green-border);background:var(--green-soft);}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+  @media (max-width:900px){.navlinks{display:none;}}
+
+  /* ---------- Layout ---------- */
+  .wrap{max-width:1320px;margin:0 auto;padding:26px 28px 60px;}
+  .grid{display:grid;grid-template-columns:1.55fr 1fr;gap:22px;align-items:start;}
+  @media (max-width:980px){.grid{grid-template-columns:1fr;} .topbar{padding:12px 16px;} .wrap{padding:16px 16px 40px;}}
+  .stack{display:flex;flex-direction:column;gap:20px;}
+  .sticky-side{position:sticky;top:78px;}
+
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);}
+
+  /* ---------- Hero status ---------- */
+  .hero{padding:26px 28px;display:flex;align-items:center;gap:18px;transition:background .4s ease,border-color .4s ease;}
+  .hero.up, .hero.resolved{background:linear-gradient(120deg,var(--green-soft) 0%, var(--surface) 60%);border-color:var(--green-border);}
+  .hero.down{background:linear-gradient(120deg,var(--red-soft) 0%, var(--surface) 60%);border-color:var(--red-border);}
+  .hero-icon{
+    width:54px;height:54px;border-radius:50%;flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;font-size:24px;
+    background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow);
+  }
+  .hero.up .hero-icon, .hero.resolved .hero-icon{background:var(--green-soft);border-color:var(--green-border);}
+  .hero.down .hero-icon{background:var(--red-soft);border-color:var(--red-border);}
+  .hero-title{font-family:'Sora';font-weight:700;font-size:22px;letter-spacing:.1px;}
+  .hero.up .hero-title, .hero.resolved .hero-title{color:var(--green);}
+  .hero.down .hero-title{color:var(--red);}
+  .hero-sub{color:var(--muted);font-size:13px;margin-top:4px;}
+  .hero-sub .updated{color:var(--muted-dim);}
+
+  /* ---------- Banner ---------- */
+  .banner{overflow:hidden;border-radius:var(--radius);max-height:0;opacity:0;transition:max-height .5s ease, opacity .4s ease, margin .4s ease;}
+  .banner.show{max-height:100px;opacity:1;margin-bottom:0;}
+  .banner-inner{display:flex;align-items:center;gap:12px;padding:15px 20px;color:#fff;box-shadow:var(--shadow-md);}
+  .banner.danger .banner-inner{background:linear-gradient(120deg,#e11d48,#be123c);}
+  .banner.ok .banner-inner{background:linear-gradient(120deg,#16a34a,#15803d);}
+  .banner-icon{font-size:19px;flex-shrink:0;}
+  .banner-text b{font-family:'Sora';letter-spacing:0.1px;}
+  .banner-flip{animation:flipIn .5s cubic-bezier(.2,.8,.2,1);}
+  @keyframes flipIn{0%{transform:rotateX(90deg);opacity:0;}60%{transform:rotateX(-8deg);opacity:1;}100%{transform:rotateX(0);opacity:1;}}
+
+  /* ---------- Metrics row ---------- */
+  .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;}
+  @media (max-width:640px){.metrics{grid-template-columns:repeat(2,1fr);}}
+  .metric{padding:16px 17px;}
+  .metric .label{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted-dim);font-weight:600;}
+  .metric .value{font-family:'Sora';font-size:23px;font-weight:700;margin-top:7px;transition:color .3s ease;color:var(--text);}
+  .metric .value.warn{color:var(--red);}
+  .metric .value.ok{color:var(--green);}
+  .metric .delta{font-size:11.5px;color:var(--muted);margin-top:4px;}
+
+  /* ---------- Section heads ---------- */
+  .sec-head{display:flex;align-items:center;justify-content:space-between;padding:17px 19px;border-bottom:1px solid var(--border-soft);}
+  .sec-head h2{margin:0;font-size:15.5px;font-weight:700;font-family:'Sora';}
+  .sec-head .sub{color:var(--muted);font-size:12px;margin-top:2px;}
+  .sec-head .tag-live{font-size:10.5px;color:var(--muted);border:1px solid var(--border);background:var(--surface-2);padding:4px 9px;border-radius:100px;display:flex;align-items:center;gap:5px;font-weight:600;}
+  .sec-head .tag-live .dot{width:5px;height:5px;background:var(--accent);box-shadow:0 0 6px rgba(79,70,229,.5);}
+
+  /* ---------- Components ---------- */
+  .comp-row{display:flex;align-items:center;justify-content:space-between;padding:13px 19px;border-bottom:1px solid var(--border-soft);font-size:13.5px;}
+  .comp-row:last-child{border-bottom:none;}
+  .comp-name{display:flex;align-items:center;gap:9px;font-weight:500;}
+  .comp-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+  .comp-status{font-size:12px;font-weight:600;padding:4px 11px;border-radius:100px;border:1px solid transparent;}
+  .comp-status.operational{color:var(--green);background:var(--green-soft);border-color:var(--green-border);}
+  .comp-status.degraded{color:var(--amber);background:var(--amber-soft);border-color:var(--amber-border);}
+  .comp-status.outage{color:var(--red);background:var(--red-soft);border-color:var(--red-border);}
+  .comp-dot.operational{background:var(--green);box-shadow:0 0 6px rgba(22,163,74,.5);}
+  .comp-dot.degraded{background:var(--amber);box-shadow:0 0 6px rgba(194,104,10,.5);}
+  .comp-dot.outage{background:var(--red);box-shadow:0 0 6px rgba(225,29,72,.5);animation:pulse 1s infinite;}
+
+  /* ---------- Chart ---------- */
+  .chart-wrap{padding:17px 19px;}
+  canvas{width:100%;height:150px;display:block;}
+  .chart-legend{display:flex;gap:16px;margin-top:10px;font-size:11.5px;color:var(--muted);}
+  .chart-legend span{display:flex;align-items:center;gap:6px;}
+  .chart-legend i{width:9px;height:9px;border-radius:2px;display:inline-block;}
+
+  /* ---------- Board ---------- */
+  .board-bg{background:var(--board-bg);}
+  .row{display:grid;grid-template-columns:70px 1.4fr 1.1fr 70px 130px 60px;align-items:center;gap:10px;padding:13px 19px;border-bottom:1px solid var(--border-soft);font-size:13.5px;}
+  .row.head{color:var(--muted-dim);font-size:11px;text-transform:uppercase;letter-spacing:.6px;padding-top:11px;padding-bottom:11px;font-weight:600;}
+  .row:last-child{border-bottom:none;}
+  .train-no{color:var(--accent);font-weight:700;}
+  .train-name{font-weight:600;}
+  .route{color:var(--muted);font-size:12.5px;}
+  .time{color:var(--muted);}
+  .platform{color:var(--muted);text-align:center;}
+  @media (max-width:640px){.row{grid-template-columns:56px 1fr 90px;} .row .route, .row .time{display:none;}}
+  .status-cell{position:relative;height:20px;overflow:hidden;}
+  .status-badge{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;letter-spacing:.1px;padding:4px 10px;border-radius:100px;border:1px solid transparent;}
+  .status-badge.ontime{background:var(--green-soft);color:var(--green);border-color:var(--green-border);}
+  .status-badge.delayed{background:var(--amber-soft);color:var(--amber);border-color:var(--amber-border);}
+  .status-badge.cancelled{background:var(--red-soft);color:var(--red);border-color:var(--red-border);}
+  .status-badge.unknown{background:var(--surface-2);color:var(--muted-dim);border-color:var(--border);}
+  .flip{animation:flipIn .45s cubic-bezier(.2,.8,.2,1);}
+
+  /* ---------- History ---------- */
+  .hist-item{padding:15px 19px;border-bottom:1px solid var(--border-soft);font-size:13px;animation:fadeUp .5s ease;}
+  .hist-item:last-child{border-bottom:none;}
+  .hist-top{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+  .hist-title{font-weight:700;font-size:13.5px;}
+  .hist-date{color:var(--muted-dim);font-size:11.5px;font-family:'IBM Plex Mono';white-space:nowrap;}
+  .hist-desc{color:var(--muted);font-size:12.5px;margin-top:5px;line-height:1.55;}
+  .hist-badge{display:inline-block;margin-top:8px;font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:100px;background:var(--green-soft);color:var(--green);border:1px solid var(--green-border);}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+
+  /* ---------- Ops console (internal — dark, scoped variable overrides) ---------- */
+  .console{
+    --surface:#12151b; --surface-2:#191d24; --board-bg:#12151b;
+    --border:#262b34; --border-soft:#20242c;
+    --text:#e7eaf0; --muted:#98a1b0; --muted-dim:#69707f;
+    --accent:#22c55e; --accent-soft:#123320; --accent-border:#1d4a30;
+    background:var(--surface);border-color:var(--border);
+    box-shadow:0 10px 30px rgba(0,0,0,.35);
+  }
+  .console-head{padding:16px 19px;border-bottom:1px solid var(--border-soft);background:linear-gradient(180deg,rgba(34,197,94,.06),transparent);border-radius:var(--radius) var(--radius) 0 0;}
+  .console-head-top{display:flex;align-items:center;justify-content:space-between;}
+  .console-head h2{margin:0;font-size:14.5px;font-weight:700;font-family:'Sora';color:var(--text);}
+  .internal-tag{font-size:10px;font-weight:700;letter-spacing:.5px;color:#4ade80;border:1px solid #1d4a30;background:#0f2a1c;padding:3px 8px;border-radius:5px;}
+  .console-head .sub{color:var(--muted);font-size:11.5px;margin-top:3px;}
+  .console-body{padding:17px 19px;display:flex;flex-direction:column;gap:16px;}
+
+  .btn{border:1px solid var(--border);background:var(--surface-2);color:var(--text);padding:9px 14px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:'Inter';transition:all .15s ease;}
+  .btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent);}
+  .btn:disabled{opacity:.4;cursor:not-allowed;}
+  .btn.primary{background:linear-gradient(155deg,#3a1418,#2a0d10);border-color:#5c1c21;color:#ffb3b6;}
+  .btn.primary:hover:not(:disabled){border-color:#ff5a5f;color:#ff5a5f;}
+  .btn.go{background:linear-gradient(155deg,#0f3320,#0b2618);border-color:#1d4a30;color:#a9f2c6;}
+  .btn.go:hover:not(:disabled){border-color:#22c55e;color:#22c55e;}
+  .btn.pulse{animation:btnpulse 1.4s infinite;}
+  @keyframes btnpulse{0%,100%{box-shadow:0 0 0 0 rgba(255,90,95,.35);}50%{box-shadow:0 0 0 6px rgba(255,90,95,0);}}
+  .btn-row{display:flex;gap:8px;flex-wrap:wrap;}
+
+  .empty-hint{color:var(--muted-dim);font-size:12.5px;line-height:1.6;padding:6px 2px;}
+  .feed{display:flex;flex-direction:column;gap:9px;max-height:190px;overflow-y:auto;padding-right:2px;}
+  .feed-item{display:flex;gap:9px;font-size:12.5px;line-height:1.5;padding-bottom:9px;border-bottom:1px dashed var(--border-soft);}
+  .feed-item:last-child{border-bottom:none;padding-bottom:0;}
+  .feed-time{color:var(--muted-dim);font-family:'IBM Plex Mono';font-size:11px;flex-shrink:0;padding-top:1px;}
+  .feed-text{color:var(--text);}
+  .feed-item.alert .feed-text{color:#ff9ba3;}
+  .feed-item.ok .feed-text{color:#8fe8b4;}
+
+  .section-label{font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted-dim);display:flex;align-items:center;gap:8px;margin-bottom:2px;font-weight:600;}
+  .section-label::after{content:"";flex:1;height:1px;background:var(--border-soft);}
+
+  .kv-card{border:1px solid var(--border-soft);border-radius:8px;background:var(--surface-2);padding:14px 15px;font-size:12.5px;animation:fadeUp .4s ease;}
+  .kv-card h3{margin:0 0 8px 0;font-size:13px;font-family:'Sora';font-weight:700;letter-spacing:.1px;color:var(--text);}
+  .kv-row{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--border-soft);}
+  .kv-row:last-child{border-bottom:none;}
+  .kv-row .k{color:var(--muted);}
+  .kv-row .v{color:var(--text);font-weight:600;text-align:right;}
+  .kv-row .v.mono{font-family:'IBM Plex Mono';font-weight:500;}
+  .tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;}
+  .tag.p1{background:#3a1418;color:#ff8b90;}
+  .tag.new{background:#3f2c0a;color:#f5b962;}
+  .tag.ack{background:#0f2540;color:#7fb2ff;}
+  .tag.resolved{background:#0f3320;color:#4ade80;}
+
+  .timeline{display:flex;flex-direction:column;gap:0;}
+  .tl-item{display:flex;gap:12px;padding:8px 0;}
+  .tl-marker{width:20px;height:20px;border-radius:50%;flex-shrink:0;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:9.5px;font-family:'IBM Plex Mono';color:var(--muted);position:relative;}
+  .tl-item:not(:last-child) .tl-marker::after{content:"";position:absolute;top:22px;left:50%;width:1px;height:calc(100% + 4px);background:var(--border-soft);transform:translateX(-50%);}
+  .tl-content{padding-top:0px;}
+  .tl-title{font-size:12.5px;font-weight:600;color:var(--text);}
+  .tl-time{font-size:10.5px;color:var(--muted-dim);font-family:'IBM Plex Mono';margin-top:1px;}
+
+  .mail-card{border:1px solid var(--border-soft);border-radius:8px;background:var(--surface);animation:fadeUp .4s ease;overflow:hidden;}
+  .mail-head{padding:10px 14px;background:var(--surface-2);border-bottom:1px solid var(--border-soft);display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted);}
+  .mail-body{padding:14px;font-size:12.5px;line-height:1.65;color:var(--text);}
+  .mail-body .subj{font-weight:700;color:var(--text);margin-bottom:8px;font-family:'Sora';font-size:13.5px;}
+  .mail-body .field{color:var(--muted);margin-bottom:3px;}
+  .mail-body .field b{color:var(--text);font-weight:600;}
+  .mail-body ul{margin:6px 0 0 18px;padding:0;}
+  .mail-body li{margin-bottom:4px;}
+
+  .progress{height:4px;background:var(--border-soft);border-radius:3px;overflow:hidden;margin-top:2px;}
+  .progress i{display:block;height:100%;background:#22c55e;width:0%;transition:width 1.4s linear;}
+
+  .footer{margin-top:34px;padding-top:18px;border-top:1px solid var(--border);display:flex;justify-content:space-between;color:var(--muted-dim);font-size:11.5px;flex-wrap:wrap;gap:8px;}
+
+  ::-webkit-scrollbar{width:6px;}
+  ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="nav-left">
+    <div class="brand"><div class="mark">T</div><div class="name">Track<span>line</span></div></div>
+    <div class="navlinks" id="tabNav">
+      <a href="javascript:void(0)" class="tab-link active" data-tab="live">Live Departures</a>
+      <a href="javascript:void(0)" class="tab-link" data-tab="history">Incident History</a>
+    </div>
+  </div>
+  <div class="sys-status">
+    <span class="clock mono" id="clock">--:--:--</span>
+    <div class="pill up" id="sysPill"><span class="dot"></span><span id="sysPillText">All systems operational</span></div>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="grid">
+
+    <!-- ============ MAIN / PUBLIC STATUS PAGE ============ -->
+    <div class="stack">
+
+      <div class="tabpanel active" id="panelLive">
+
+      <div class="banner" id="banner">
+        <div class="banner-inner">
+          <span class="banner-icon" id="bannerIcon">⚠️</span>
+          <div class="banner-text" id="bannerText"></div>
+        </div>
+      </div>
+
+      <div class="card hero up" id="hero" style="scroll-margin-top:80px;">
+        <div class="hero-icon" id="heroIcon">✅</div>
+        <div>
+          <div class="hero-title" id="heroTitle">All Systems Operational</div>
+          <div class="hero-sub">Real-time status for Trackline&rsquo;s public train services &middot; <span class="updated">Last checked <span id="heroUpdated" class="mono">--:--:--</span></span></div>
+        </div>
+      </div>
+
+      <div class="metrics">
+        <div class="card metric">
+          <div class="label">Uptime (30d)</div>
+          <div class="value ok" id="mUptime">99.95%</div>
+          <div class="delta">Across all services</div>
+        </div>
+        <div class="card metric">
+          <div class="label">Avg response time</div>
+          <div class="value" id="mResponse">118 ms</div>
+          <div class="delta" id="mResponseDelta">Train Status API</div>
+        </div>
+        <div class="card metric">
+          <div class="label">Active incidents</div>
+          <div class="value ok" id="mIncidents">0</div>
+          <div class="delta" id="mIncidentsDelta">All clear</div>
+        </div>
+        <div class="card metric">
+          <div class="label">Open P1 tickets</div>
+          <div class="value ok" id="mTickets">0</div>
+          <div class="delta" id="mTicketsDelta">App Support queue</div>
+        </div>
+      </div>
+
+      <div class="card" id="components" style="scroll-margin-top:80px;">
+        <div class="sec-head">
+          <div><h2>Component status</h2><div class="sub">Individually monitored services</div></div>
+          <div class="tag-live"><span class="dot"></span>LIVE</div>
+        </div>
+        <div id="compList"></div>
+      </div>
+
+      <div class="card">
+        <div class="sec-head">
+          <div><h2>Response time</h2><div class="sub">Train Status API &middot; last ~90 seconds</div></div>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="chart"></canvas>
+          <div class="chart-legend">
+            <span><i style="background:var(--accent)"></i>Response time (ms)</span>
+            <span><i style="background:var(--red)"></i>Failed / timed out</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card board-bg" id="board" style="scroll-margin-top:80px;">
+        <div class="sec-head">
+          <div><h2>Live departures</h2><div class="sub">Mumbai Central &middot; updated in real time</div></div>
+          <div class="tag-live"><span class="dot"></span>6 services tracked</div>
+        </div>
+        <div class="row head"><div>No.</div><div>Train</div><div>Route</div><div>Sched</div><div>Status</div><div>Plat.</div></div>
+        <div id="trainRows"></div>
+      </div>
+
+      </div><!-- /panelLive -->
+
+      <div class="tabpanel" id="panelHistory">
+      <div class="card" id="history" style="scroll-margin-top:80px;">
+        <div class="sec-head">
+          <div><h2>Incident history</h2><div class="sub">Past 30 days</div></div>
+        </div>
+        <div id="histList"></div>
+      </div>
+      </div><!-- /panelHistory -->
+
+      <div class="footer">
+        <span>Trackline Status &middot; Monitoring 5 services</span>
+        <span>All times shown in local browser time</span>
+      </div>
+    </div>
+
+    <!-- ============ INTERNAL OPS CONSOLE ============ -->
+    <div class="sticky-side">
+      <div class="card console">
+        <div class="console-head">
+          <div class="console-head-top">
+            <h2>App Support Console</h2>
+            <span class="internal-tag">🔒 INTERNAL</span>
+          </div>
+          <div class="sub">Monitoring &middot; Incident &middot; Ticketing &middot; RCA</div>
+        </div>
+        <div class="console-body">
+          <div class="btn-row" id="controls">
+            <button class="btn primary" id="btnSimulate">▶ Run incident simulation</button>
+          </div>
+          <div>
+            <div class="section-label">Alert feed</div>
+            <div class="feed" id="feed">
+              <div class="empty-hint">No alerts yet. Run the simulation to watch the full incident lifecycle — detection, paging, ticketing, acknowledgment, root cause, fix and RCA — play out automatically, start to end.</div>
+            </div>
+          </div>
+          <div id="dynamicCards" style="display:flex;flex-direction:column;gap:14px;"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(function(){
+  // ================= tabs =================
+  const tabLinks = document.querySelectorAll('.tab-link');
+  const panels = { live: document.getElementById('panelLive'), history: document.getElementById('panelHistory') };
+  function switchTab(name){
+    tabLinks.forEach(a=>a.classList.toggle('active', a.dataset.tab===name));
+    Object.keys(panels).forEach(k=> panels[k].classList.toggle('active', k===name));
+  }
+  tabLinks.forEach(a=> a.addEventListener('click', ()=> switchTab(a.dataset.tab)));
+
+  // ================= clock =================
+  function tickClock(){
+    const t = new Date().toLocaleTimeString('en-IN',{hour12:false});
+    document.getElementById('clock').textContent = t;
+    document.getElementById('heroUpdated').textContent = t;
+  }
+  tickClock(); setInterval(tickClock,1000);
+  function nowStr(){ return new Date().toLocaleTimeString('en-IN',{hour12:false}); }
+
+  // ================= components =================
+  const COMPONENTS = [
+    {key:'api', name:'Train Status API', status:'operational'},
+    {key:'board', name:'Live Departure Board', status:'operational'},
+    {key:'booking', name:'Booking & Ticketing', status:'operational'},
+    {key:'notify', name:'Notifications', status:'operational'},
+    {key:'mobile', name:'Mobile App', status:'operational'},
+  ];
+  const STATUS_LABEL = {operational:'Operational', degraded:'Degraded Performance', outage:'Major Outage'};
+
+  function renderComponents(){
+    document.getElementById('compList').innerHTML = COMPONENTS.map(c=>`
+      <div class="comp-row">
+        <div class="comp-name"><span class="comp-dot ${c.status}"></span>${c.name}</div>
+        <div class="comp-status ${c.status}">${STATUS_LABEL[c.status]}</div>
+      </div>
+    `).join('');
+  }
+  renderComponents();
+
+  function setComponents(mode){
+    if(mode==='down'){
+      COMPONENTS[0].status='outage';
+      COMPONENTS[1].status='degraded';
+    } else {
+      COMPONENTS.forEach(c=>c.status='operational');
+    }
+    renderComponents();
+  }
+
+  // ================= train board =================
+  const TRAINS = [
+    {no:'12951', name:'Coastal Express',      route:'Mumbai Ctrl → Ahmedabad', time:'16:35', plat:'4', status:'ontime', delay:0},
+    {no:'22119', name:'Highland Mail',        route:'Mumbai Ctrl → Pune',      time:'16:50', plat:'9', status:'ontime', delay:0},
+    {no:'11077', name:'Metro Shuttle',        route:'Andheri → Churchgate',    time:'17:05', plat:'2', status:'delayed', delay:6},
+    {no:'12137', name:'Night Voyager',        route:'Mumbai Ctrl → Nagpur',    time:'17:20', plat:'6', status:'ontime', delay:0},
+    {no:'19031', name:'Summit Express',       route:'Bandra → Dehradun',       time:'17:40', plat:'3', status:'ontime', delay:0},
+    {no:'10103', name:'River Line Passenger', route:'Thane → Diva',            time:'17:55', plat:'1', status:'delayed', delay:3},
+  ];
+  const trainRows = document.getElementById('trainRows');
+  let systemUp = true;
+
+  function statusBadge(t){
+    if(!systemUp) return '<span class="status-badge unknown">— · —</span>';
+    if(t.status==='ontime') return '<span class="status-badge ontime">ON TIME</span>';
+    if(t.status==='delayed') return `<span class="status-badge delayed">DELAYED ${t.delay}m</span>`;
+    return '<span class="status-badge cancelled">CANCELLED</span>';
+  }
+  function renderTrains(flip){
+    trainRows.innerHTML = TRAINS.map(t=>`
+      <div class="row">
+        <div class="train-no mono">${t.no}</div>
+        <div class="train-name">${t.name}</div>
+        <div class="route">${t.route}</div>
+        <div class="time mono">${t.time}</div>
+        <div class="status-cell"><span class="${flip?'flip':''}" style="display:inline-block">${statusBadge(t)}</span></div>
+        <div class="platform">${systemUp ? t.plat : '—'}</div>
+      </div>
+    `).join('');
+  }
+  renderTrains(false);
+
+  // ================= response-time chart =================
+  const canvas = document.getElementById('chart');
+  const ctx = canvas.getContext('2d');
+  let chartData = [];
+  for(let i=0;i<28;i++) chartData.push({v: 90+Math.random()*70, err:false});
+
+  function resizeCanvas(){
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width*dpr; canvas.height = 150*dpr;
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    drawChart();
+  }
+
+  function drawChart(){
+    const w = canvas.clientWidth, h = 150;
+    ctx.clearRect(0,0,w,h);
+    // grid lines
+    ctx.strokeStyle = '#eef0f6'; ctx.lineWidth = 1;
+    for(let i=1;i<4;i++){
+      const y = (h/4)*i;
+      ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();
+    }
+    const maxV = Math.max(300, ...chartData.map(d=>d.v));
+    const stepX = w/(chartData.length-1);
+
+    // area fill
+    ctx.beginPath();
+    chartData.forEach((d,i)=>{
+      const x = i*stepX, y = h - (d.v/maxV)*h*0.85 - 6;
+      if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    });
+    ctx.lineTo(w,h); ctx.lineTo(0,h); ctx.closePath();
+    const grad = ctx.createLinearGradient(0,0,0,h);
+    grad.addColorStop(0,'rgba(79,70,229,0.16)'); grad.addColorStop(1,'rgba(79,70,229,0)');
+    ctx.fillStyle = grad; ctx.fill();
+
+    // line, colored red where err
+    ctx.lineWidth = 2;
+    for(let i=1;i<chartData.length;i++){
+      const d0=chartData[i-1], d1=chartData[i];
+      const x0=(i-1)*stepX, y0=h-(d0.v/maxV)*h*0.85-6;
+      const x1=i*stepX, y1=h-(d1.v/maxV)*h*0.85-6;
+      ctx.strokeStyle = (d0.err||d1.err) ? '#e11d48' : '#4f46e5';
+      ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x1,y1); ctx.stroke();
+    }
+    // last point dot
+    const last = chartData[chartData.length-1];
+    const lx = w, ly = h-(last.v/maxV)*h*0.85-6;
+    ctx.fillStyle = last.err ? '#e11d48' : '#4f46e5';
+    ctx.beginPath(); ctx.arc(lx-2,ly,3.5,0,Math.PI*2); ctx.fill();
+  }
+
+  function pushChartPoint(v, err){
+    chartData.push({v, err: !!err});
+    if(chartData.length>32) chartData.shift();
+    drawChart();
+  }
+
+  window.addEventListener('resize', resizeCanvas);
+  setTimeout(resizeCanvas, 50);
+
+  // ambient updates while healthy
+  setInterval(()=>{
+    if(!systemUp) return;
+    const t = TRAINS[Math.floor(Math.random()*TRAINS.length)];
+    if(Math.random() < 0.5){
+      if(t.status==='ontime'){ t.status='delayed'; t.delay = 2 + Math.floor(Math.random()*8); }
+      else { t.delay = Math.max(1, t.delay + (Math.random()<0.5?-1:1)); if(t.delay<=1){t.status='ontime'; t.delay=0;} }
+    }
+    renderTrains(true);
+    const v = 90+Math.random()*70;
+    pushChartPoint(v,false);
+    document.getElementById('mResponse').textContent = Math.round(v)+' ms';
+  }, 4200);
+
+  // ================= hero / pill / banner =================
+  const sysPill = document.getElementById('sysPill');
+  const sysPillText = document.getElementById('sysPillText');
+  const hero = document.getElementById('hero');
+  const heroIcon = document.getElementById('heroIcon');
+  const heroTitle = document.getElementById('heroTitle');
+  const banner = document.getElementById('banner');
+  const bannerIcon = document.getElementById('bannerIcon');
+  const bannerText = document.getElementById('bannerText');
+
+  function setPill(mode, text){ sysPill.className = 'pill ' + mode; sysPillText.textContent = text; }
+  function setHero(mode, icon, title){
+    hero.className = 'card hero ' + mode;
+    heroIcon.textContent = icon;
+    heroTitle.textContent = title;
+  }
+  function showBanner(mode, icon, html){
+    banner.className = 'banner show ' + (mode==='danger'?'danger':'ok');
+    bannerIcon.textContent = icon; bannerText.innerHTML = html;
+    bannerText.classList.remove('banner-flip'); void bannerText.offsetWidth; bannerText.classList.add('banner-flip');
+  }
+  function hideBanner(){ banner.className = 'banner'; }
+
+  // ================= metrics =================
+  function setMetrics(mode){
+    const inc = document.getElementById('mIncidents'), incD = document.getElementById('mIncidentsDelta');
+    const tix = document.getElementById('mTickets'), tixD = document.getElementById('mTicketsDelta');
+    const resp = document.getElementById('mResponse'), respD = document.getElementById('mResponseDelta');
+    const up = document.getElementById('mUptime');
+    if(mode==='down'){
+      inc.textContent='1'; inc.className='value warn'; incD.textContent='Train Status API — P1';
+      tix.textContent='1'; tix.className='value warn'; tixD.textContent='App Support queue';
+      resp.textContent='timeout'; resp.className='value warn'; respD.textContent='Train Status API';
+      up.textContent='99.91%';
+    } else {
+      inc.textContent='0'; inc.className='value ok'; incD.textContent='All clear';
+      tix.textContent='0'; tix.className='value ok'; tixD.textContent='App Support queue';
+      resp.textContent='112 ms'; resp.className='value'; respD.textContent='Train Status API';
+      up.textContent='99.95%';
+    }
+  }
+
+  // ================= feed =================
+  const feedEl = document.getElementById('feed');
+  let feedStarted = false;
+  function pushFeed(text, kind){
+    if(!feedStarted){ feedEl.innerHTML=''; feedStarted = true; }
+    const div = document.createElement('div');
+    div.className = 'feed-item ' + (kind||'');
+    div.innerHTML = `<span class="feed-time mono">${nowStr()}</span><span class="feed-text">${text}</span>`;
+    feedEl.prepend(div);
+  }
+
+  // ================= dynamic ops cards =================
+  const dyn = document.getElementById('dynamicCards');
+  const controls = document.getElementById('controls');
+  function clearDyn(){ dyn.innerHTML = ''; }
+  function incidentId(){ return 'INC' + Math.floor(1000000 + Math.random()*8999999); }
+  let incident = null;
+
+  function renderTimeline(){
+    let html = `<div class="section-label">Incident timeline</div><div class="timeline">`;
+    incident.timeline.forEach((step,i)=>{
+      html += `<div class="tl-item"><div class="tl-marker">${i+1}</div>
+        <div class="tl-content"><div class="tl-title">${step.title}</div><div class="tl-time">${step.time}</div></div></div>`;
+    });
+    html += `</div>`;
+    let el = document.getElementById('timelineCard');
+    if(!el){ el = document.createElement('div'); el.id='timelineCard'; el.className='kv-card'; dyn.appendChild(el); }
+    el.innerHTML = html;
+  }
+  function addTimelineStep(title){ incident.timeline.push({title, time: nowStr()}); renderTimeline(); }
+
+  function renderIncidentSummary(){
+    const el = document.createElement('div');
+    el.className = 'kv-card'; el.id = 'summaryCard';
+    el.innerHTML = `
+      <h3>Incident summary</h3>
+      <div class="kv-row"><span class="k">Incident ID</span><span class="v mono">${incident.id}</span></div>
+      <div class="kv-row"><span class="k">Detected</span><span class="v">${incident.startTime}</span></div>
+      <div class="kv-row"><span class="k">Service</span><span class="v">Train Status API</span></div>
+      <div class="kv-row"><span class="k">Trigger</span><span class="v">Health check — 3 consecutive failures</span></div>
+      <div class="kv-row"><span class="k">Impact</span><span class="v">Public status page &amp; API unavailable</span></div>
+    `;
+    dyn.appendChild(el);
+  }
+
+  function renderTicket(state){
+    let el = document.getElementById('ticketCard');
+    const tagClass = state==='New'?'new':state==='Acknowledged'?'ack':'resolved';
+    const extra = state==='Resolved' ? `
+      <div class="kv-row"><span class="k">Time to acknowledge</span><span class="v mono">${incident.mtta||'—'}</span></div>
+      <div class="kv-row"><span class="k">Time to resolve</span><span class="v mono">${incident.mttr||'—'}</span></div>` : '';
+    const html = `
+      <h3>Ticket — ${incident.id}</h3>
+      <div class="kv-row"><span class="k">State</span><span class="v"><span class="tag ${tagClass}">${state.toUpperCase()}</span></span></div>
+      <div class="kv-row"><span class="k">Priority</span><span class="v"><span class="tag p1">P1 — CRITICAL</span></span></div>
+      <div class="kv-row"><span class="k">Short description</span><span class="v">Train Status API outage</span></div>
+      <div class="kv-row"><span class="k">Assignment group</span><span class="v">App Support</span></div>
+      <div class="kv-row"><span class="k">Assigned to</span><span class="v">${state==='New'?'Unassigned':'Sonika Behere'}</span></div>
+      <div class="kv-row"><span class="k">Opened</span><span class="v mono">${incident.startTime}</span></div>
+      ${extra}
+    `;
+    if(!el){ el = document.createElement('div'); el.id='ticketCard'; el.className='kv-card';
+      dyn.insertBefore(el, dyn.children[1] || null); }
+    el.innerHTML = html;
+  }
+
+  function renderMail(){
+    const el = document.createElement('div');
+    el.className = 'mail-card';
+    el.innerHTML = `
+      <div class="mail-head">📧 <span>Auto-sent to app-support-team@trackline.io, stakeholders@trackline.io</span></div>
+      <div class="mail-body">
+        <div class="subj">RCA — ${incident.id} — Train Status API outage</div>
+        <div class="field"><b>Status:</b> Resolved</div>
+        <div class="field"><b>Duration:</b> ${incident.durationLabel}</div>
+        <div class="field"><b>Distribution:</b> App Support, On-call Stakeholders</div>
+        <div class="field"><b>Detected:</b> ${incident.startTime} &nbsp; <b>Resolved:</b> ${nowStr()}</div>
+        <div class="field" style="margin-top:8px;"><b>Root cause</b></div>
+        <div>Connection pool exhaustion on the status-service database tier caused health checks to fail and the API to return errors.</div>
+        <div class="field" style="margin-top:8px;"><b>Resolution</b></div>
+        <div>Restarted status-service instances and scaled the database connection pool. Service verified healthy.</div>
+        <div class="field" style="margin-top:8px;"><b>Follow-up actions</b></div>
+        <ul>
+          <li>Add connection-pool saturation alert ahead of exhaustion</li>
+          <li>Load-test status-service against peak concurrent requests</li>
+          <li>Review auto-scaling thresholds for the database tier</li>
+        </ul>
+      </div>
+    `;
+    dyn.appendChild(el);
+  }
+
+  function fmtDuration(ms){
+    const s = Math.round(ms/1000);
+    return s < 60 ? s + 's' : Math.floor(s/60)+'m '+(s%60)+'s';
+  }
+
+  // ================= incident history =================
+  const HISTORY_SEED = [
+    {title:'Elevated latency on Booking & Ticketing', date:'12 Aug, 09:14', desc:'Booking requests were slower than usual during a scheduled database migration. Resolved after rollback.'},
+    {title:'Notifications delayed by ~4 minutes', date:'3 Aug, 18:47', desc:'Push notification queue backed up after a spike in traffic. Auto-scaled workers and cleared backlog.'},
+  ];
+  function renderHistorySeed(){
+    document.getElementById('histList').innerHTML = HISTORY_SEED.map(h=>`
+      <div class="hist-item">
+        <div class="hist-top"><div class="hist-title">${h.title}</div><div class="hist-date">${h.date}</div></div>
+        <div class="hist-desc">${h.desc}</div>
+        <div class="hist-badge">RESOLVED</div>
+      </div>
+    `).join('');
+  }
+  renderHistorySeed();
+
+  function prependHistory(entry){
+    const wrap = document.getElementById('histList');
+    const div = document.createElement('div');
+    div.className = 'hist-item';
+    div.innerHTML = `
+      <div class="hist-top"><div class="hist-title">${entry.title}</div><div class="hist-date">${entry.date}</div></div>
+      <div class="hist-desc">${entry.desc}</div>
+      <div class="hist-badge">RESOLVED</div>
+    `;
+    wrap.prepend(div);
+  }
+
+  // ================= control flow =================
+  function setControls(html){ controls.innerHTML = html; }
+
+  function startOutage(){
+    switchTab('live');
+    systemUp = false;
+    incident = { id: incidentId(), startTime: nowStr(), startMs: Date.now(), timeline: [], durationLabel:'', mtta:'', mttr:'' };
+    setControls(`<button class="btn primary" disabled>▶ Running simulation…</button>`);
+    clearDyn();
+    renderTrains(true);
+    setPill('down','Service disruption');
+    setHero('down','🔴','Major Service Disruption');
+    setComponents('down');
+    setMetrics('down');
+    pushChartPoint(3200, true);
+    showBanner('danger','⚠️','<b>Service is currently unavailable.</b> We&rsquo;re experiencing a technical issue — our team is working on it, back shortly.');
+    pushFeed('🔴 Health check failed — <code>/api/train-status</code> returned 500 (×3)', 'alert');
+    addTimelineStep('Outage detected by synthetic monitoring');
+
+    setTimeout(()=>{
+      pushChartPoint(0, true);
+      pushFeed('📟 Incident automatically opened', 'alert');
+      renderIncidentSummary();
+      addTimelineStep('Incident record created');
+    }, 900);
+
+    setTimeout(()=>{
+      pushFeed(`🎫 Ticket <b>${incident.id}</b> auto-created — Priority P1`, 'alert');
+      renderTicket('New');
+      addTimelineStep('Ticket ' + incident.id + ' created (State: New)');
+    }, 1900);
+
+    setTimeout(()=>{
+      pushChartPoint(0, true);
+      pushFeed('📣 App Support Team paged — awaiting acknowledgment', 'alert');
+      addTimelineStep('On-call App Support team paged');
+      setControls(`<button class="btn primary pulse" disabled>✅ Acknowledging…</button>`);
+    }, 2900);
+
+    setTimeout(acknowledge, 4300);
+  }
+
+  function acknowledge(){
+    incident.ackMs = Date.now();
+    incident.mtta = fmtDuration(incident.ackMs - incident.startMs);
+    pushFeed('✅ Acknowledged by <b>Sonika Behere</b>', 'ok');
+    renderTicket('Acknowledged');
+    addTimelineStep('Acknowledged by Sonika Behere');
+    setControls(`<button class="btn go" disabled>📞 Notifying stakeholders…</button>`);
+    setTimeout(notifyStakeholders, 1200);
+  }
+
+  function notifyStakeholders(){
+    pushFeed('📞 Stakeholders notified — on-call bridge opened', 'ok');
+    addTimelineStep('Stakeholders paged, on-call bridge opened');
+    setControls(`<button class="btn go" disabled>🔍 Investigating root cause…</button>`);
+    setTimeout(rootCauseFound, 1500);
+  }
+
+  function rootCauseFound(){
+    pushFeed('🔍 Root cause identified — DB connection pool exhaustion', 'ok');
+    addTimelineStep('Root cause identified: DB connection pool exhaustion');
+    setControls(`<button class="btn go" disabled>🚀 Deploying fix…</button>`);
+    setTimeout(deployFix, 1300);
+  }
+
+  function deployFix(){
+    setControls(`<button class="btn go" disabled>🚀 Deploying fix…</button>
+      <div class="progress" style="flex-basis:100%;"><i id="deployBar"></i></div>`);
+    requestAnimationFrame(()=>{ const bar=document.getElementById('deployBar'); if(bar) bar.style.width = '100%'; });
+    pushFeed('🚀 Deploying fix — restarting status-service, scaling DB pool', 'ok');
+    addTimelineStep('Fix deployed: service restarted, DB pool scaled');
+
+    setTimeout(()=>{
+      systemUp = true;
+      incident.mttr = fmtDuration(Date.now() - incident.startMs);
+      renderTrains(true);
+      setPill('resolved','Service restored');
+      setHero('resolved','✅','All Systems Operational');
+      setComponents('up');
+      setMetrics('up');
+      pushChartPoint(105, false);
+      showBanner('ok','✅','<b>Service is back up and running properly.</b> Thanks for your patience.');
+      pushFeed('🟢 Service health checks passing', 'ok');
+      renderTicket('Resolved');
+      addTimelineStep('Service verified healthy — ticket Resolved');
+
+      incident.durationLabel = fmtDuration(Date.now() - incident.startMs);
+      pushFeed('📧 RCA generated and emailed to App Support &amp; stakeholders', 'ok');
+      addTimelineStep('RCA generated and emailed to App Support and stakeholders');
+      renderMail();
+
+      prependHistory({
+        title: 'Train Status API outage',
+        date: 'Today, ' + incident.startTime,
+        desc: `Connection pool exhaustion on the database tier caused the Train Status API to fail health checks. Detected automatically, root cause found, and fix deployed in ${incident.durationLabel}.`
+      });
+
+      setControls(`<button class="btn primary" id="btnReset">↺ Run another simulation</button>`);
+      document.getElementById('btnReset').onclick = reset;
+
+      setTimeout(()=>{ hideBanner(); }, 6000);
+    }, 1500);
+  }
+
+  function reset(){
+    clearDyn();
+    feedEl.innerHTML = '<div class="empty-hint">No alerts yet. Run the simulation to watch the full incident lifecycle — detection, paging, ticketing, acknowledgment, root cause, fix and RCA — play out automatically, start to end.</div>';
+    feedStarted = false;
+    hideBanner();
+    setPill('up','All systems operational');
+    setHero('up','✅','All Systems Operational');
+    setControls(`<button class="btn primary" id="btnSimulate">▶ Run incident simulation</button>`);
+    document.getElementById('btnSimulate').onclick = startOutage;
+  }
+
+  document.getElementById('btnSimulate').onclick = startOutage;
+})();
+</script>
+
+</body>
+</html>
